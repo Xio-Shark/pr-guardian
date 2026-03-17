@@ -42,6 +42,7 @@ def _log_event(event: str, **fields: object) -> None:
 
 
 async def _maybe_await(value: Any) -> Any:
+    # 统一兼容真实异步实现和测试里的同步假对象，减少主流程分支。
     if inspect.isawaitable(value):
         return await value
     return value
@@ -55,6 +56,7 @@ def _normalize_policy(raw_policy: object) -> Policy:
     if isinstance(raw_policy, Policy):
         return raw_policy
 
+    # 兼容旧 loader 输出和当前 Policy 模型，避免配置结构演进把 CLI 绑死。
     llm_cfg = getattr(raw_policy, "llm", None)
     policy_cfg = getattr(raw_policy, "policy", None)
     return Policy(
@@ -89,6 +91,7 @@ def _build_diff_from_files(files: list[Any]) -> Diff:
         path = str(getattr(file_item, "filename", ""))
         patch = getattr(file_item, "patch", None)
         patch_text = patch if isinstance(patch, str) else ""
+        # GitHub files API 只给 patch 文本，这里先重建 hunk 才能复用统一规则接口。
         parsed = parse_diff(f"diff --git a/{path} b/{path}\n{patch_text}\n") if patch_text else parse_diff("")
 
         hunks: list[Hunk] = []
@@ -135,6 +138,7 @@ def should_run_llm(diff: Diff, policy: Policy) -> bool:
     if policy.llm_budget_usd <= 0:
         return False
     changed_lines = sum(file.additions + file.deletions for file in diff.files)
+    # 复用自动修复阈值作为复杂度门槛，把 LLM 留给纯规则更难覆盖的大改动。
     return changed_lines > policy.max_changed_lines_for_autofix
 
 
@@ -186,6 +190,7 @@ async def _review_impl(repo: str, pr_number: int, token: str, config: str, llm: 
                 findings.extend(llm_findings)
                 _log_event("llm.review_done", findings=len(llm_findings))
             except Exception as llm_error:  # noqa: BLE001
+                # LLM 是增强层，不应因为 provider 波动阻断确定性规则门禁。
                 _log_event("llm.review_failed", error=str(llm_error))
 
         head_sha = str(pr_details.get("head_sha") or "")
@@ -201,6 +206,7 @@ async def _review_impl(repo: str, pr_number: int, token: str, config: str, llm: 
             _log_event("report.dry_run", findings=len(findings))
 
         has_error_finding = any(getattr(finding, "severity", None) == Severity.ERROR for finding in findings)
+        # 统一以 error finding 决定退出码，便于 CI 直接把结果接到 gating。
         raise SystemExit(1 if has_error_finding else 0)
     finally:
         close_method = getattr(client, "close", None)

@@ -67,6 +67,8 @@ def _should_include_file(diff_file: DiffFile, findings: list[FindingLike]) -> bo
 
 
 class ContextBuilder:
+    """把规则结果压缩成 LLM 可消费上下文，是为了把模型预算优先留给高价值证据。"""
+
     def __init__(self, policy: Policy):
         self.policy: Policy = policy
 
@@ -92,9 +94,11 @@ class ContextBuilder:
         }
 
         max_tokens = self.policy.llm_max_context_tokens
+        # 先为固定元数据预留预算，避免文件上下文把配置和规则结果挤掉。
         base_tokens = self.estimate_tokens(json.dumps(payload, ensure_ascii=False))
         remaining_tokens = max(max_tokens - base_tokens, 0)
 
+        # 有 finding 时优先发送证据相关文件，避免模型预算浪费在无关改动上。
         candidates = [
             diff_file
             for diff_file in diff.files
@@ -103,6 +107,7 @@ class ContextBuilder:
         def file_rank(diff_file: DiffFile) -> int:
             return self._file_risk_rank(diff_file.path, findings)
 
+        # 先放高风险文件，才能在预算耗尽前保住安全和正确性线索。
         candidates.sort(key=file_rank)
 
         for diff_file in candidates:
@@ -110,6 +115,7 @@ class ContextBuilder:
             context_tokens = self.estimate_tokens(json.dumps(current_context, ensure_ascii=False))
 
             if context_tokens > remaining_tokens:
+                # 单文件超预算时优先裁剪，而不是直接丢弃，避免大文件完全失去上下文。
                 fitted_context = self._fit_within_budget(diff_file, remaining_tokens)
                 if fitted_context is None:
                     continue
@@ -130,6 +136,7 @@ class ContextBuilder:
         patch_lines = redacted_patch.splitlines()
         cropped_patch = "\n".join(patch_lines[:max_lines])
 
+        # 只保留 hunk 热点，是为了让 LLM 看到定位信息而不重复消费整份文件内容。
         hotspots = [
             {
                 "line_start": hunk.new_start,
@@ -148,6 +155,7 @@ class ContextBuilder:
 
     def redact_secrets(self, text: str) -> str:
         redacted_text = text
+        # 在进入 LLM 之前统一脱敏，可以减少审查链路再次暴露敏感值的风险。
         redaction_patterns = [
             (r"\b(?:sk|pk)-[A-Za-z0-9_-]{8,}\b", "[REDACTED]"),
             (r"(?i)\bBearer\s+[A-Za-z0-9._~+\-/]+=*", "Bearer [REDACTED]"),
@@ -162,6 +170,7 @@ class ContextBuilder:
         return redacted_text
 
     def estimate_tokens(self, text: str) -> int:
+        # 用保守估算而不是 provider 专属 tokenizer，是为了让预算策略在多模型下保持稳定。
         chinese_characters = 0
         other_characters = 0
         for character in text:
@@ -209,6 +218,7 @@ class ContextBuilder:
 
         line_limit = 200
         while line_limit >= 10:
+            # 折半裁剪能更快逼近预算上限，避免在线性试探上浪费时间。
             current_context = self.crop_file_context(diff_file, max_lines=line_limit)
             current_tokens = self.estimate_tokens(json.dumps(current_context, ensure_ascii=False))
             if current_tokens <= remaining_tokens:

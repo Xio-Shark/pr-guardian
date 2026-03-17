@@ -10,6 +10,8 @@ from pr_guardian.rules.base import FindingFactory, Rule
 
 
 class MinPermissionsRule(Rule):
+    """强制显式 permissions，是为了把 GitHub Actions 权限收敛成可审计配置。"""
+
     RULE_ID: str = "ci/min-permissions"
     RULE_TITLE: str = "GitHub Actions 权限最小化检查"
     DEFAULT_SEVERITY: Severity = Severity.ERROR
@@ -57,6 +59,7 @@ class MinPermissionsRule(Rule):
             if not diff_file.patch:
                 continue
 
+            # 同时保留新增行和上下文行，才能在 finding 中回指到稳定的 YAML 行号。
             line_entries = self._extract_new_file_lines(diff_file.patch)
             self._line_entries_by_file[diff_file.path] = line_entries
             workflow = self._parse_workflow("\n".join(line for _, line in line_entries))
@@ -87,6 +90,7 @@ class MinPermissionsRule(Rule):
         has_job_permissions = any(isinstance(job, dict) and "permissions" in job for job in jobs.values())
 
         if not has_workflow_permissions and not has_job_permissions:
+            # 缺少 permissions 本身就是风险，因为默认权限会随仓库设置漂移。
             line_number, snippet = self._find_line(line_entries, r"^\s*jobs\s*:\s*$")
             findings.append(
                 FindingFactory.create(
@@ -160,6 +164,7 @@ class MinPermissionsRule(Rule):
                 file_path,
                 normalized_scope,
             ):
+                # 只对显式例外放行，避免临时授权逐渐演变成默认习惯。
                 continue
 
             line_pattern = rf"^\s*{re.escape(scope_name)}\s*:\s*{re.escape(access_level)}\s*$"
