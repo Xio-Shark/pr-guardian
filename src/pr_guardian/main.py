@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, Optional, cast
 
 import click
 
@@ -19,10 +19,14 @@ from pr_guardian.models import Diff, DiffFile, Hunk, Policy, Severity
 from pr_guardian.policy import PolicyLoader
 from pr_guardian.rules import registry
 
+_GitHubReporter: Optional[type] = None
 try:
-    from pr_guardian.report.github_reporter import GitHubReporter
+    from pr_guardian.report.github_reporter import GitHubReporter as _ImportedReporter
+
+    _GitHubReporter = _ImportedReporter
 except ModuleNotFoundError:
-    GitHubReporter = cast(Any, None)
+    pass
+GitHubReporter = _GitHubReporter
 
 
 logger = logging.getLogger("pr_guardian.main")

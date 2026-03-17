@@ -15,6 +15,9 @@ dependencies = [
   "click>=8.0",
 ]
 
+[project.scripts]
+pr-guardian = "pr_guardian.main:cli"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
