@@ -10,6 +10,8 @@ from .base import FindingFactory, Rule
 
 
 class LockfileConsistencyRule(Rule):
+    """把 manifest 和 lockfile 成对校验，避免依赖解析结果只在本地机器上变化。"""
+
     MANIFEST_TO_LOCKFILE: dict[str, list[str]] = {
         "package.json": ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"],
         "pyproject.toml": ["poetry.lock", "Pipfile.lock"],
@@ -92,6 +94,7 @@ class LockfileConsistencyRule(Rule):
         changed_paths = {PurePosixPath(changed.path.replace("\\", "/")) for changed in diff.files}
 
         for lockfile_name in expected_lockfiles:
+            # 只检查同目录兄弟 lockfile，才能避免 monorepo 中同名文件互相误判。
             lockfile_path = manifest_parent / lockfile_name
             if lockfile_path in changed_paths:
                 return True

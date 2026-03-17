@@ -120,6 +120,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    # 深合并默认配置，是为了允许用户只覆盖局部字段而不重复整份策略。
     merged = deepcopy(base)
     for key, value in override.items():
         current_value = merged.get(key)

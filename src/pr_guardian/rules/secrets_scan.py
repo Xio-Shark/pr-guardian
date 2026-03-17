@@ -10,6 +10,8 @@ from pr_guardian.rules.base import Evidence, FindingFactory, Rule, RuleRegistry
 
 
 class SecretsScanRule(Rule):
+    """把确定性模式和熵检测结合起来，是为了同时覆盖已知密钥格式和未知高风险字符串。"""
+
     RULE_ID = "security/secrets-scan"
     RULE_TITLE = "硬编码密钥扫描"
     RULE_DESCRIPTION = "扫描 PR 新增行中的硬编码密钥与高熵可疑字符串。"
@@ -81,6 +83,7 @@ class SecretsScanRule(Rule):
             if not diff_file.patch:
                 continue
 
+            # 只扫描新增内容，是为了让门禁聚焦本次引入的风险而不是历史债务。
             for line_number, content in self._iter_added_lines(diff_file):
                 findings.extend(self._scan_known_patterns(diff_file, line_number, content, severity, allowlist))
                 findings.extend(self._scan_entropy(diff_file, line_number, content, severity, allowlist))
@@ -125,6 +128,7 @@ class SecretsScanRule(Rule):
         allowlist: list[str],
     ) -> list[Finding]:
         results: list[Finding] = []
+        # 先排除已知模式和占位符，才能让高熵兜底策略尽量少报示例值。
         for candidate in self.BASE64_PATTERN.findall(content):
             if len(candidate) < self.MIN_BASE64_LENGTH:
                 continue
@@ -153,6 +157,7 @@ class SecretsScanRule(Rule):
                 continue
             if self._calculate_entropy(candidate) < self.ENTROPY_THRESHOLD:
                 continue
+            # 不直接回显命中的十六进制全文，是为了在报告里继续控制敏感信息暴露面。
             fingerprint = hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:10]
             evidence = [Evidence(file=diff_file.path, line=line_number, snippet=content.strip())]
             results.append(
