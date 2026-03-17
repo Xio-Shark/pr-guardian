@@ -139,4 +139,5 @@ __all__ = [
     "match_glob_pattern",
     "path_matches_any",
     "DiffFile",
+    "Evidence",
 ]

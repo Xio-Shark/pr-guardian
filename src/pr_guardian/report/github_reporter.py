@@ -188,7 +188,7 @@ class GitHubReporter:
             return {"created": False, "updated": False, "unchanged": True, "comment_id": existing_summary.get("id")}
 
         if existing_summary and existing_summary.get("id") is not None:
-            updated = self.client._request(  # type: ignore[attr-defined]
+            updated = self.client._request(
                 "PATCH",
                 f"/repos/{self.client.repo}/issues/comments/{existing_summary['id']}",
                 json={"body": body},
@@ -247,7 +247,7 @@ class GitHubReporter:
     def _list_existing_review_fingerprints(self, pr_number: int) -> set[str]:
         if not hasattr(self.client, "_request"):
             return set()
-        response = self.client._request(  # type: ignore[attr-defined]
+        response = self.client._request(
             "GET",
             f"/repos/{self.client.repo}/pulls/{pr_number}/comments",
             params={"per_page": 100},

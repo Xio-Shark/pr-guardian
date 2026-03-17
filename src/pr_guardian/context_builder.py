@@ -116,7 +116,8 @@ class ContextBuilder:
                 current_context = fitted_context
                 context_tokens = self.estimate_tokens(json.dumps(current_context, ensure_ascii=False))
 
-            payload["changed_files"].append(current_context)
+            changed_files_list: list[dict[str, object]] = payload["changed_files"]  # type: ignore[assignment]
+            changed_files_list.append(current_context)
             remaining_tokens -= context_tokens
             if remaining_tokens <= 0:
                 break
