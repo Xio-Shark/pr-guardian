@@ -15,6 +15,8 @@ JSONDict: TypeAlias = dict[str, JSONValue]
 
 
 class LLMClient(ABC):
+    """统一结构化生成接口，是为了让不同 provider 能被同一审查流程替换。"""
+
     @abstractmethod
     def generate_structured(
         self,
@@ -31,6 +33,8 @@ class UnsupportedLLMProviderError(ValueError):
 
 
 class LLMClientFactory:
+    """把 provider 注册集中管理，是为了让调用方不依赖具体实现模块。"""
+
     _providers: dict[str, Callable[[JSONDict], LLMClient]] = {}
 
     @staticmethod
@@ -53,6 +57,8 @@ class LLMClientFactory:
 
 
 class CachingLLMClient(LLMClient):
+    """按请求语义缓存结果，是为了降低重复 review 的成本并稳定测试。"""
+
     def __init__(self, wrapped_client: LLMClient) -> None:
         self._wrapped_client: LLMClient = wrapped_client
         self._cache: dict[str, JSONDict] = {}
@@ -84,6 +90,7 @@ class CachingLLMClient(LLMClient):
         schema: type[BaseModel],
         params: JSONDict,
     ) -> str:
+        # 把 schema 和参数一起纳入 key，才能避免不同输出契约误命中缓存。
         payload = {
             "system_prompt": system_prompt,
             "user_payload": user_payload,
@@ -95,6 +102,8 @@ class CachingLLMClient(LLMClient):
 
 
 class BudgetLLMClient(LLMClient):
+    """在客户端侧记录预算，是为了在 provider 计费接口不统一时仍能做统一约束。"""
+
     def __init__(
         self,
         wrapped_client: LLMClient,
@@ -131,6 +140,7 @@ class BudgetLLMClient(LLMClient):
         generated_result = self._wrapped_client.generate_structured(system_prompt, user_payload, schema, params)
         estimated_cost = self._estimate_cost_usd(generated_result)
         with self._budget_lock:
+            # 很多 provider 只有响应后才返回 usage，所以需要在真实成本落地后再二次校验。
             next_spent_usd = self._spent_usd + estimated_cost
             if next_spent_usd > self._max_budget_usd:
                 raise RuntimeError(
