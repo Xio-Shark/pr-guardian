@@ -6,6 +6,8 @@ from pr_guardian.rules.base import FindingFactory, Rule, path_matches_any
 
 
 class ChangelogBreakingRule(Rule):
+    """把 breaking change 和发布说明绑定，避免 API 变更只存在于代码而没有对外沟通。"""
+
     @property
     def rule_id(self) -> str:
         return "quality/changelog-breaking"
@@ -63,6 +65,7 @@ class ChangelogBreakingRule(Rule):
         return "当 PR 包含 breaking changes 时，要求同步更新 changelog 或版本信息。"
 
     def execute(self, diff: Diff, policy: Policy, pr_title: str = "", pr_body: str = "") -> list[Finding]:
+        # 优先允许策略覆盖路径约定，是为了兼容不同仓库的发布目录结构。
         self._public_api_patterns = self._resolve_public_api_patterns(policy)
         self._changelog_patterns = self._resolve_changelog_patterns(policy)
 
@@ -91,6 +94,7 @@ class ChangelogBreakingRule(Rule):
             return True
 
         for diff_file in diff.files:
+            # 标题没写 breaking 时，公共 API 变更仍然是值得提醒的强信号。
             if self._is_public_api_change(diff_file):
                 return True
 
@@ -129,6 +133,7 @@ class ChangelogBreakingRule(Rule):
 
     def _build_primary_evidence(self, diff: Diff, pr_title: str, pr_body: str) -> Evidence:
         if any(keyword in f"{pr_title}\n{pr_body}" for keyword in self.BREAKING_KEYWORDS):
+            # 优先引用 PR 元信息，是为了把问题直接指向开发者声明入口。
             snippet = (pr_title or pr_body or "PR 元信息包含 breaking change 标记")[:200]
             file_name = diff.files[0].path if diff.files else "pull_request"
             return Evidence(file=file_name, line=1, snippet=snippet)

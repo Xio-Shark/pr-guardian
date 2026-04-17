@@ -20,6 +20,8 @@ class DiffFile:
 
 
 class GitHubAPIError(RuntimeError):
+    """保留请求元信息，是为了让上层能区分网络、限流和返回体形状问题。"""
+
     def __init__(
         self,
         message: str,
@@ -39,6 +41,8 @@ class GitHubAPIError(RuntimeError):
 
 
 class GitHubAPIClient:
+    """集中处理 GitHub API 的重试和形状校验，避免调用方散落网络边界逻辑。"""
+
     def __init__(
         self,
         token: str,
@@ -55,6 +59,7 @@ class GitHubAPIClient:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        # 允许注入 client，是为了让测试复用假实现并隔离真实网络。
         if client is not None:
             self._client = client
         else:
@@ -67,6 +72,7 @@ class GitHubAPIClient:
         page = 1
         all_files: list[DiffFile] = []
 
+        # GitHub files API 单页最多 100 条，必须聚合所有分页才能避免漏审。
         while True:
             response_files = self._request(
                 "GET",
@@ -209,6 +215,7 @@ class GitHubAPIClient:
     ) -> Any:
         success_statuses = expected_statuses or {200}
 
+        # 只对瞬时网络和限流错误重试，避免把确定性失败伪装成偶发抖动。
         for attempt in range(1, self.max_retries + 1):
             try:
                 response = self._client.request(
@@ -225,7 +232,7 @@ class GitHubAPIClient:
                         "method": method,
                         "endpoint": endpoint,
                         "attempt": attempt,
-                        "params": params,
+                        # 不记录 params 以避免敏感信息泄露
                     },
                 )
                 if attempt >= self.max_retries:
@@ -252,7 +259,7 @@ class GitHubAPIClient:
                         "attempt": attempt,
                         "status_code": response.status_code,
                         "delay_seconds": delay_seconds,
-                        "response": response.text,
+                        # 不记录响应体以避免敏感信息泄露
                     },
                 )
                 time.sleep(delay_seconds)
@@ -265,7 +272,7 @@ class GitHubAPIClient:
                     "endpoint": endpoint,
                     "attempt": attempt,
                     "status_code": response.status_code,
-                    "response": response.text,
+                    # 不记录响应体以避免敏感信息泄露
                 },
             )
             raise GitHubAPIError(
@@ -290,6 +297,7 @@ class GitHubAPIClient:
             return True
 
         if response.status_code == 403:
+            # GitHub 会用 403 表示限流，所以不能把所有 403 都当成权限错误。
             retry_after = response.headers.get("Retry-After")
             rate_remaining = response.headers.get("X-RateLimit-Remaining")
             return retry_after is not None or rate_remaining == "0"
@@ -303,6 +311,7 @@ class GitHubAPIClient:
             try:
                 retry_after_seconds = float(retry_after)
                 if retry_after_seconds > 0:
+                    # 优先尊重服务端退避建议，避免客户端指数退避和平台限流策略冲突。
                     return retry_after_seconds
             except ValueError:
                 pass

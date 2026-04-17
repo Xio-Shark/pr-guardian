@@ -1,4 +1,4 @@
-"""PR Guardian 领域模型定义。"""
+"""把核心数据结构收敛到同一套模型，避免规则层、LLM 层和回写层各自解释 PR 语义。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class Severity(str, Enum):
-    """表示规则发现的严重级别。"""
+    """统一严重级别，是为了让门禁和 GitHub 输出共用同一套判定标准。"""
 
     ERROR = "error"
     WARNING = "warning"
@@ -17,7 +17,7 @@ class Severity(str, Enum):
 
 
 class Location(BaseModel):
-    """表示文件中的定位信息，可映射到 PR 左右侧行。"""
+    """保留 PR 左右侧坐标，是为了让回写评论能稳定落到 diff 上。"""
 
     file: str
     start_line: int | None = None
@@ -26,7 +26,7 @@ class Location(BaseModel):
 
 
 class Evidence(BaseModel):
-    """表示支持规则发现的具体证据片段。"""
+    """要求证据结构化，是为了让 finding 可追溯且便于后续自动化消费。"""
 
     file: str
     line: int
@@ -34,7 +34,7 @@ class Evidence(BaseModel):
 
 
 class FixSuggestion(BaseModel):
-    """表示可选的自动修复建议及其替换范围。"""
+    """把修复建议建模成范围替换，是为了兼容后续自动修复和 UI 展示。"""
 
     description: str
     replacement: str | None = None
@@ -44,7 +44,7 @@ class FixSuggestion(BaseModel):
 
 
 class Finding(BaseModel):
-    """表示单条规则在 PR 中发现的问题。"""
+    """统一 finding 结构，是为了让规则层和 LLM 层产出可以直接汇总。"""
 
     id: str
     rule_id: str
@@ -58,7 +58,7 @@ class Finding(BaseModel):
 
 
 class Hunk(BaseModel):
-    """表示单个 Diff 块及其行级映射信息。"""
+    """保存行级映射，是为了让后续规则和评论定位不必重新解析 patch。"""
 
     old_start: int
     old_count: int
@@ -68,7 +68,7 @@ class Hunk(BaseModel):
 
 
 class DiffFile(BaseModel):
-    """表示 PR 中单个文件的变更内容。"""
+    """把文件变更和 hunk 打包，是为了让规则只关心审查语义而不关心来源。"""
 
     path: str
     status: Literal["added", "removed", "modified", "renamed"]
@@ -79,13 +79,13 @@ class DiffFile(BaseModel):
 
 
 class Diff(BaseModel):
-    """表示 PR 的整体 Diff 结构。"""
+    """保留 PR 级 diff 视图，是为了让跨文件规则能在同一入口上工作。"""
 
     files: list[DiffFile]
 
 
 class Policy(BaseModel):
-    """表示 PR Guardian 的策略配置与执行开关。"""
+    """把执行开关集中建模，是为了让规则、LLM 和回写层读取同一份策略。"""
 
     gate: bool
     auto_fix: bool

@@ -5,7 +5,7 @@ import re
 
 
 HUNK_HEADER_PATTERN = re.compile(
-    r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@"
+    r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s
 )
 DIFF_HEADER_PATTERN = re.compile(r"^diff --git a/(.+) b/(.+)$", re.MULTILINE)
 
@@ -93,6 +93,7 @@ def parse_patch(patch: str) -> list[Hunk]:
 
     for patch_line_index, line in enumerate(patch_lines, start=1):
         if line.startswith("@@"):
+            # 遇到新 hunk 先落盘上一个，避免跨 hunk 的行号状态串在一起。
             flush_current_hunk()
             old_start, old_count, new_start, new_count = _parse_hunk_header(line)
             old_line = old_start
@@ -140,6 +141,7 @@ def parse_patch(patch: str) -> list[Hunk]:
             continue
 
         if line.startswith("\\"):
+            # 保留 no-newline 元信息，才能让定位仍然指向刚刚那一行真实变更。
             current_hunk_lines.append(
                 PatchLine(patch_line_index, "no_newline", line, last_old_line, last_new_line)
             )
@@ -180,6 +182,7 @@ def parse_diff(diff_text: str) -> Diff:
             if line.startswith("@@"):
                 hunk_started = True
             if hunk_started:
+                # 只保留 hunk 区段，是为了让后续规则忽略 Git 元数据噪音。
                 patch_lines.append(line)
         patch = "\n".join(patch_lines)
         hunks = parse_patch(patch)
