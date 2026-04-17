@@ -11,6 +11,8 @@ from pr_guardian.models import Finding, Policy, Severity
 
 
 class GitHubReporter:
+    """把结构化 finding 映射成 GitHub 三通道输出，避免各发布路径各自拼消息。"""
+
     SUMMARY_MARKER = "<!-- pr-guardian:summary -->"
     FINGERPRINT_MARKER_PREFIX = "<!-- pr-guardian:fingerprint="
     FINGERPRINT_MARKER_PATTERN = re.compile(r"<!--\s*pr-guardian:fingerprint=([a-f0-9]{16,64})\s*-->")
@@ -70,6 +72,7 @@ class GitHubReporter:
                     "message": finding.message,
                 }
             )
+            # Check Run 单次注解数量有限，截断能避免整次发布因为超额而失败。
             if len(annotations) >= 50:
                 break
 
@@ -96,6 +99,7 @@ class GitHubReporter:
         commit_id: str,
         findings: list[Finding],
     ) -> dict[str, Any]:
+        # 用 fingerprint 去重，避免同一 PR 多次重跑后重复刷出相同行内评论。
         existing_fingerprints = self._list_existing_review_fingerprints(pr_number)
         comments: list[dict[str, Any]] = []
 
@@ -183,12 +187,13 @@ class GitHubReporter:
                 )
 
         body = "\n".join(body_lines).strip()
+        # 用固定 marker 锁定同一条汇总评论，保证重复执行时走更新而不是追加。
         existing_summary = self._find_existing_summary_comment(pr_number)
         if existing_summary and existing_summary.get("body", "") == body:
             return {"created": False, "updated": False, "unchanged": True, "comment_id": existing_summary.get("id")}
 
         if existing_summary and existing_summary.get("id") is not None:
-            updated = self.client._request(  # type: ignore[attr-defined]
+            updated = self.client._request(
                 "PATCH",
                 f"/repos/{self.client.repo}/issues/comments/{existing_summary['id']}",
                 json={"body": body},
@@ -233,6 +238,7 @@ class GitHubReporter:
         if finding.evidence:
             first_evidence = finding.evidence[0]
             evidence_key = f"{first_evidence.file}:{first_evidence.line}:{first_evidence.snippet}"
+        # 把证据位置纳入指纹，才能让同一规则在不同位置的 finding 并存。
         payload = "|".join(
             [
                 finding.rule_id,
@@ -247,7 +253,7 @@ class GitHubReporter:
     def _list_existing_review_fingerprints(self, pr_number: int) -> set[str]:
         if not hasattr(self.client, "_request"):
             return set()
-        response = self.client._request(  # type: ignore[attr-defined]
+        response = self.client._request(
             "GET",
             f"/repos/{self.client.repo}/pulls/{pr_number}/comments",
             params={"per_page": 100},

@@ -16,6 +16,8 @@ DEFAULT_PATH_TO_TEST = {
 
 
 class AffectedTestsRule(Rule):
+    """要求 PR 主动声明测试，是为了让受影响范围和验证动作在评审时一起出现。"""
+
     _RULE_ID: str = "monorepo/affected-tests"
     _TITLE: str = "受影响测试检查"
     _DEFAULT_SEVERITY: Severity = Severity.WARNING
@@ -51,6 +53,7 @@ class AffectedTestsRule(Rule):
     ) -> list[Finding]:
         mappings = self._resolve_mappings(policy=policy, override_mappings=test_mappings)
 
+        # 先聚合影响范围再给单条 finding，避免一个 PR 因多个文件刷出重复提醒。
         all_affected_tests: set[str] = set()
         impacted_files: list[str] = []
         for changed_file in diff.files:
@@ -121,6 +124,7 @@ class AffectedTestsRule(Rule):
         if any(pattern in normalized_body for pattern in self.TEST_LABEL_PATTERNS):
             return True
 
+        # 接受通用测试命令标记，是为了兼容团队只写执行命令而不逐个列文件的习惯。
         broad_markers = ["test", "tests", "- [x] test", "- [x] tests", "pytest", "jest", "go test"]
         if any(marker in normalized_body for marker in broad_markers):
             return True
@@ -142,6 +146,7 @@ class AffectedTestsRule(Rule):
 
         wildcard_collapsed = normalized_pattern
         while "**/" in wildcard_collapsed:
+            # 额外裁剪 "**/"，是为了让映射模式同时覆盖根目录和嵌套包结构。
             wildcard_collapsed = wildcard_collapsed.replace("**/", "", 1)
             if fnmatch.fnmatchcase(normalized_path, wildcard_collapsed):
                 return True
