@@ -171,27 +171,33 @@ async def _review_impl(repo: str, pr_number: int, token: str, config: str, llm: 
 
         if policy.llm_enabled and should_run_llm(diff, policy):
             context = ContextBuilder(policy).build_context(diff, findings)
-            llm_client = LLMClientFactory.create(
-                policy.llm_provider,
-                {
-                    "model": policy.llm_model,
-                    "budget_usd": policy.llm_budget_usd,
-                    "max_context_tokens": policy.llm_max_context_tokens,
-                    "api_key": os.getenv("OPENAI_API_KEY", ""),
-                },
-            )
-            try:
-                review_method = cast(Any, getattr(llm_client, "review", None))
-                if callable(review_method):
-                    llm_result = await _maybe_await(review_method(context))
-                    llm_findings = getattr(llm_result, "findings", [])
-                else:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if not api_key:
+                _log_event("llm.skipped", reason="OPENAI_API_KEY not set")
+                llm_findings = []
+            else:
+                llm_client = LLMClientFactory.create(
+                    policy.llm_provider,
+                    {
+                        "model": policy.llm_model,
+                        "budget_usd": policy.llm_budget_usd,
+                        "max_context_tokens": policy.llm_max_context_tokens,
+                        "api_key": api_key,
+                    },
+                )
+                try:
+                    review_method = cast(Any, getattr(llm_client, "review", None))
+                    if callable(review_method):
+                        llm_result = await _maybe_await(review_method(context))
+                        llm_findings = getattr(llm_result, "findings", [])
+                    else:
+                        llm_findings = []
+                    findings.extend(llm_findings)
+                    _log_event("llm.review_done", findings=len(llm_findings))
+                except Exception as llm_error:  # noqa: BLE001
+                    # LLM 是增强层，不应因为 provider 波动阻断确定性规则门禁。
+                    _log_event("llm.review_failed", error=str(llm_error))
                     llm_findings = []
-                findings.extend(llm_findings)
-                _log_event("llm.review_done", findings=len(llm_findings))
-            except Exception as llm_error:  # noqa: BLE001
-                # LLM 是增强层，不应因为 provider 波动阻断确定性规则门禁。
-                _log_event("llm.review_failed", error=str(llm_error))
 
         head_sha = str(pr_details.get("head_sha") or "")
         commit_id = head_sha

@@ -232,7 +232,7 @@ class GitHubAPIClient:
                         "method": method,
                         "endpoint": endpoint,
                         "attempt": attempt,
-                        "params": params,
+                        # 不记录 params 以避免敏感信息泄露
                     },
                 )
                 if attempt >= self.max_retries:
@@ -259,7 +259,7 @@ class GitHubAPIClient:
                         "attempt": attempt,
                         "status_code": response.status_code,
                         "delay_seconds": delay_seconds,
-                        "response": response.text,
+                        # 不记录响应体以避免敏感信息泄露
                     },
                 )
                 time.sleep(delay_seconds)
@@ -272,7 +272,7 @@ class GitHubAPIClient:
                     "endpoint": endpoint,
                     "attempt": attempt,
                     "status_code": response.status_code,
-                    "response": response.text,
+                    # 不记录响应体以避免敏感信息泄露
                 },
             )
             raise GitHubAPIError(
