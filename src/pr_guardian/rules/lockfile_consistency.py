@@ -5,7 +5,6 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from ..models import Diff, DiffFile, Evidence, Finding, Policy, Severity
-
 from .base import FindingFactory, Rule
 
 

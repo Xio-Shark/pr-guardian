@@ -124,6 +124,41 @@ pr-guardian review --repo owner/repo --pr 123 --dry-run
 pr-guardian review --repo owner/repo --pr 123 --no-llm
 ```
 
+### 3. 执行多语言测试（CI/CD 测试平台）
+
+pr-guardian 现在还能作为**多语言 CI/CD 测试平台**：自动识别仓库语言栈、执行测试、回写 GitHub Check Run。
+
+```bash
+# 只跑本地测试并输出（不访问 GitHub）
+pr-guardian test --local-path /path/to/repo --dry-run
+
+# 执行测试并回写 GitHub Check Run（测试失败 → Check Run failure）
+pr-guardian test --repo owner/repo --pr 123 --local-path /path/to/repo
+
+# 强制指定语言栈（多语言仓库）
+pr-guardian test --local-path /path/to/repo --stack go --dry-run
+```
+
+**支持的 8 种语言栈**（自动按文件签名识别）：
+
+| 栈 | 检测文件 | 测试命令 | 报告 |
+|----|---------|---------|------|
+| python | pyproject.toml / pytest.ini | pytest | JUnit XML |
+| go | go.mod | go test ./... | go test -json |
+| typescript | package.json (vitest/jest) | npm test | vitest/jest JUnit |
+| java | build.gradle.kts / pom.xml | ./gradlew test | Gradle XML |
+| dart | pubspec.yaml | flutter test | --machine JSON |
+| rust | Cargo.toml | cargo test | stdout 解析 |
+| cpp | CMakeLists.txt | ctest | CTest XML |
+| shell | test.sh / Makefile | bash test.sh / make test | exit code |
+
+### 4. 自动生成测试配置
+
+```bash
+pr-guardian init           # 扫描当前项目生成 .pr-guardian.yml
+pr-guardian init --force   # 覆盖已有配置
+```
+
 ### 3. 配置文件
 
 在项目根目录创建 `.pr-guardian.yml`：
@@ -184,6 +219,18 @@ pr-guardian/
 │   │   ├── affected_tests.py
 │   │   ├── min_permissions.py
 │   │   └── changelog_breaking.py
+│   ├── testrunner/              # 多语言测试执行层
+│   │   ├── base.py              # TestAdapter 抽象 + JUnit 解析
+│   │   ├── detect.py            # 语言栈检测路由
+│   │   ├── executor.py          # subprocess 执行封装
+│   │   ├── pytest_adapter.py    # Python
+│   │   ├── go_adapter.py        # Go (go test -json)
+│   │   ├── ts_adapter.py        # TypeScript (vitest/jest)
+│   │   ├── gradle_adapter.py    # Java/Kotlin
+│   │   ├── flutter_adapter.py   # Dart/Flutter
+│   │   ├── cargo_adapter.py     # Rust
+│   │   ├── ctest_adapter.py     # C++/CMake
+│   │   └── shell_adapter.py     # Shell 约定
 │   ├── llm/                     # LLM 适配层
 │   │   ├── schema.py            # Pydantic 输出模型
 │   │   ├── prompts.py           # System prompts

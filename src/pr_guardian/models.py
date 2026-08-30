@@ -84,6 +84,61 @@ class Diff(BaseModel):
     files: list[DiffFile]
 
 
+class TestStatus(str, Enum):
+    """统一测试用例状态，是为了让各语言适配器的解析结果可以汇总到同一套统计。"""
+
+    # 名前缀 Test 会被 pytest 收集器误判为测试类，这里显式关闭收集。
+    __test__ = False
+
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    ERROR = "error"
+
+
+class TestCase(BaseModel):
+    """保存单个测试用例结果，是为了让失败用例能映射到 Check Run 注解和行内评论。"""
+
+    __test__ = False
+
+    suite: str
+    name: str
+    status: TestStatus
+    duration_ms: float = 0.0
+    failure_message: str | None = None
+    file: str | None = None
+    line: int | None = None
+
+
+class TestRunResult(BaseModel):
+    """把一次测试运行收敛为统一结果，是为了让报告层不感知具体语言内部差异。"""
+
+    __test__ = False
+
+    stack: str
+    command: list[str]
+    exit_code: int
+    duration_ms: float
+    count: int
+    passed: int
+    failed: int
+    skipped: int
+    cases: list[TestCase] = Field(default_factory=list)
+    stdout: str = ""
+    junit_path: str | None = None
+
+
+class TestConfig(BaseModel):
+    """测试执行配置，供 testrunner 与主流程读取（与 policy.py 的 Policy.test 字段复用）。"""
+
+    enabled: bool = True
+    executor: str = "local"
+    timeout_seconds: int = 600
+    excluded_paths: list[str] = Field(default_factory=list)
+    post_actions: list[str] = Field(default_factory=list)
+    lang_overrides: dict[str, str] = Field(default_factory=dict)
+
+
 class Policy(BaseModel):
     """把执行开关集中建模，是为了让规则、LLM 和回写层读取同一份策略。"""
 
@@ -103,6 +158,7 @@ class Policy(BaseModel):
     deny_paths: list[str]
     max_changed_lines_for_autofix: int
     require_evidence: bool
+    test: TestConfig = Field(default_factory=TestConfig)
 
 
 __all__ = [
@@ -115,4 +171,7 @@ __all__ = [
     "DiffFile",
     "Hunk",
     "Policy",
+    "TestStatus",
+    "TestCase",
+    "TestRunResult",
 ]

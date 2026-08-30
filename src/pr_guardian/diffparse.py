@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-
+from dataclasses import dataclass
 
 HUNK_HEADER_PATTERN = re.compile(
-    r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s
+    r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@$"
 )
 DIFF_HEADER_PATTERN = re.compile(r"^diff --git a/(.+) b/(.+)$", re.MULTILINE)
 

@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, cast
 
 import click
 
@@ -15,11 +15,12 @@ from pr_guardian.context_builder import ContextBuilder
 from pr_guardian.diffparse import parse_diff
 from pr_guardian.github_api import GitHubAPIClient
 from pr_guardian.llm.client import LLMClientFactory
-from pr_guardian.models import Diff, DiffFile, Hunk, Policy, Severity
+from pr_guardian.models import Diff, DiffFile, Hunk, Policy, Severity, TestConfig
 from pr_guardian.policy import PolicyLoader
 from pr_guardian.rules import registry
+from pr_guardian.testrunner import detect_stack, list_stacks
 
-_GitHubReporter: Optional[type] = None
+_GitHubReporter: type | None = None
 try:
     from pr_guardian.report.github_reporter import GitHubReporter as _ImportedReporter
 
@@ -59,6 +60,7 @@ def _normalize_policy(raw_policy: object) -> Policy:
     # 兼容旧 loader 输出和当前 Policy 模型，避免配置结构演进把 CLI 绑死。
     llm_cfg = getattr(raw_policy, "llm", None)
     policy_cfg = getattr(raw_policy, "policy", None)
+    test_cfg = getattr(raw_policy, "test", None)
     return Policy(
         gate=bool(_policy_attr(raw_policy, "gate", True)),
         auto_fix=bool(_policy_attr(raw_policy, "auto_fix", False)),
@@ -76,6 +78,7 @@ def _normalize_policy(raw_policy: object) -> Policy:
         deny_paths=list(getattr(policy_cfg, "deny_paths", [])),
         max_changed_lines_for_autofix=int(getattr(policy_cfg, "max_changed_lines_for_autofix", 50)),
         require_evidence=bool(getattr(policy_cfg, "require_evidence", True)),
+        test=test_cfg if isinstance(test_cfg, TestConfig) else TestConfig(),
     )
 
 
@@ -234,6 +237,98 @@ def cli() -> None:
 @click.option("--dry-run", is_flag=True, help="仅输出，不发布")
 def review(repo: str, pr_number: int, token: str, config: str, llm: bool, dry_run: bool) -> None:
     asyncio.run(_review_impl(repo, pr_number, token, config, llm, dry_run))
+
+
+@cli.command()
+@click.option("--repo", help="GitHub仓库，格式：owner/name（--dry-run 可省略）")
+@click.option("--pr", "pr_number", type=int, help="PR编号（--dry-run 可省略）")
+@click.option("--token", envvar="GITHUB_TOKEN", help="GitHub token（--dry-run 可省略）")
+@click.option("--local-path", type=click.Path(exists=True), required=True, help="PR 代码本地 checkout 路径")
+@click.option("--config", type=click.Path(), default=".pr-guardian.yml")
+@click.option("--stack", help="强制指定测试栈 (python/go/typescript/java/dart/rust/cpp/shell)")
+@click.option("--dry-run", is_flag=True, help="仅执行本地测试并输出，不访问/回写 GitHub")
+def test(
+    repo: str | None,
+    pr_number: int | None,
+    token: str | None,
+    local_path: str,
+    config: str,
+    stack: str | None,
+    dry_run: bool,
+) -> None:
+    """执行多语言测试；dry-run 只跑本地并输出，否则回写 GitHub Check Run。"""
+    from pr_guardian.report.check_run_reporter import CheckRunReporter, result_to_json
+
+    policy = _load_policy(config)
+    overrides = {stack: "1"} if stack else dict(policy.test.lang_overrides)
+    adapter = detect_stack(Path(local_path), overrides)
+    if adapter is None:
+        _log_event(
+            "test.stack_not_detected",
+            local_path=local_path,
+            supported_stacks=list_stacks(),
+        )
+        raise SystemExit(2)
+
+    result = adapter.run(Path(local_path))
+    _log_event(
+        "test.run_done",
+        stack=result.stack,
+        command=" ".join(result.command),
+        exit_code=result.exit_code,
+        passed=result.passed,
+        failed=result.failed,
+        skipped=result.skipped,
+    )
+
+    if dry_run:
+        print(result_to_json(result))
+    else:
+        if not repo or not pr_number or not token:
+            raise click.UsageError("非 dry-run 模式需要 --repo/--pr/--token")
+
+        client = GitHubAPIClient(token, repo)
+        try:
+            pr_details = client.get_pr_details(pr_number)
+            head_sha = str(pr_details.get("head_sha") or "")
+            reporter = CheckRunReporter(client)
+            report = reporter.publish(head_sha=head_sha, result=result)
+            _log_event("test.report_published", **report)
+        finally:
+            client.close()
+
+    raise SystemExit(1 if result.failed > 0 or result.exit_code != 0 else 0)
+
+
+@cli.command()
+@click.option("--path", type=click.Path(exists=True), default=".", help="项目根目录")
+@click.option("--force", is_flag=True, help="覆盖已有 .pr-guardian.yml")
+def init(path: str, force: bool) -> None:
+    """扫描当前项目，自动生成 .pr-guardian.yml 测试配置。"""
+    import yaml
+
+    root = Path(path)
+    config_path = root / ".pr-guardian.yml"
+    if config_path.exists() and not force:
+        click.echo(f"已存在 {config_path}，使用 --force 覆盖。")
+        return
+
+    adapter = detect_stack(root)
+    detected_stack = adapter.stack if adapter else "unknown"
+    config_data = {
+        "version": 1,
+        "test": {
+            "enabled": True,
+            "executor": "local",
+            "timeout_seconds": 600,
+            "excluded_paths": ["vendor/**", "node_modules/**", "build/**", ".git/**"],
+            "post_actions": ["github_check_run", "pr_comment"],
+            "lang_overrides": {detected_stack: {"command_hint": "auto"}},
+        },
+    }
+    config_path.write_text(yaml.safe_dump(config_data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    click.echo(f"已生成 {config_path}，检测到语言栈: {detected_stack}")
+    click.echo("支持的语言栈: " + ", ".join(list_stacks()))
 
 
 if __name__ == "__main__":

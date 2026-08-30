@@ -6,6 +6,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from pr_guardian.models import TestConfig
+
 DEFAULT_ENABLED_RULES = [
     "security/secrets-scan",
     "deps/lockfile-consistency",
@@ -39,8 +41,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_changed_lines_for_autofix": 50,
         "require_evidence": True,
     },
+    "test": {
+        "enabled": True,
+        "executor": "local",
+        "timeout_seconds": 600,
+        "excluded_paths": ["vendor/**", "node_modules/**", "build/**", ".git/**"],
+        "post_actions": ["github_check_run", "pr_comment"],
+        "lang_overrides": {},
+    },
 }
 
+SUPPORTED_TEST_EXECUTORS = {"local", "docker"}
 SUPPORTED_LLM_PROVIDERS = {
     "openai",
     "anthropic",
@@ -88,6 +99,7 @@ class Policy(BaseModel):
     lockfile_mappings: dict[str, list[str]] = Field(default_factory=dict)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     policy: SecurityPolicy = Field(default_factory=SecurityPolicy)
+    test: TestConfig = Field(default_factory=TestConfig)
 
 
 class PolicyLoader:
@@ -106,6 +118,7 @@ class PolicyLoader:
             lockfile_mappings=merged_config["rules"]["lockfile_mappings"],
             llm=merged_config["llm"],
             policy=merged_config["policy"],
+            test=merged_config["test"],
         )
 
 
@@ -149,6 +162,10 @@ def validate_policy(policy: Policy) -> list[str]:
     conflict_patterns = sorted(set(policy.include).intersection(policy.exclude))
     for pattern in conflict_patterns:
         errors.append(f"include/exclude 存在冲突模式: {pattern}")
+
+    if policy.test.executor not in SUPPORTED_TEST_EXECUTORS:
+        supported = ", ".join(sorted(SUPPORTED_TEST_EXECUTORS))
+        errors.append(f"test.executor 不支持: {policy.test.executor}，可选值: {supported}")
 
     return errors
 
