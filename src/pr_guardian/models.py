@@ -155,6 +155,8 @@ class Policy(BaseModel):
     llm_model: str
     llm_max_context_tokens: int
     llm_budget_usd: float
+    llm_base_url: str | None = None
+    llm_api_key_env: str = "OPENAI_API_KEY"
     deny_paths: list[str]
     max_changed_lines_for_autofix: int
     require_evidence: bool

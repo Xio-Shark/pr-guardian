@@ -184,8 +184,10 @@ rules:
 
 llm:
   enabled: true
-  provider: openai
+  provider: openai        # openai / glm / kimi / minimax / custom
   model: gpt-4o
+  base_url: null          # 任意 OpenAI 兼容地址 (vLLM/Ollama/DeepSeek 等)，null 用 provider 默认
+  api_key_env: OPENAI_API_KEY   # 从哪个环境变量读 API key
   max_context_tokens: 8000
   budget_usd_per_pr: 0.50
   strategy:

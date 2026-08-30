@@ -14,7 +14,8 @@ import click
 from pr_guardian.context_builder import ContextBuilder
 from pr_guardian.diffparse import parse_diff
 from pr_guardian.github_api import GitHubAPIClient
-from pr_guardian.llm.client import LLMClientFactory
+from pr_guardian.llm import PR_REVIEW_SYSTEM_PROMPT, build_llm_client
+from pr_guardian.llm.schema import LLMReviewResult
 from pr_guardian.models import Diff, DiffFile, Hunk, Policy, Severity, TestConfig
 from pr_guardian.policy import PolicyLoader
 from pr_guardian.rules import registry
@@ -75,6 +76,8 @@ def _normalize_policy(raw_policy: object) -> Policy:
         llm_model=str(getattr(llm_cfg, "model", "gpt-4o")),
         llm_max_context_tokens=int(getattr(llm_cfg, "max_context_tokens", 8000)),
         llm_budget_usd=float(getattr(llm_cfg, "budget_usd_per_pr", 0.0)),
+        llm_base_url=str(getattr(llm_cfg, "base_url", "") or None),
+        llm_api_key_env=str(getattr(llm_cfg, "api_key_env", "OPENAI_API_KEY")),
         deny_paths=list(getattr(policy_cfg, "deny_paths", [])),
         max_changed_lines_for_autofix=int(getattr(policy_cfg, "max_changed_lines_for_autofix", 50)),
         require_evidence=bool(getattr(policy_cfg, "require_evidence", True)),
@@ -174,27 +177,35 @@ async def _review_impl(repo: str, pr_number: int, token: str, config: str, llm: 
 
         if policy.llm_enabled and should_run_llm(diff, policy):
             context = ContextBuilder(policy).build_context(diff, findings)
-            api_key = os.getenv("OPENAI_API_KEY", "")
+            api_key_env = policy.llm_api_key_env or "OPENAI_API_KEY"
+            api_key = os.getenv(api_key_env, "")
             if not api_key:
-                _log_event("llm.skipped", reason="OPENAI_API_KEY not set")
+                _log_event("llm.skipped", reason=f"{api_key_env} not set")
                 llm_findings = []
             else:
-                llm_client = LLMClientFactory.create(
-                    policy.llm_provider,
+                llm_client = build_llm_client(
                     {
+                        "provider": policy.llm_provider,
                         "model": policy.llm_model,
                         "budget_usd": policy.llm_budget_usd,
                         "max_context_tokens": policy.llm_max_context_tokens,
                         "api_key": api_key,
-                    },
+                        "base_url": policy.llm_base_url or "",
+                    }
                 )
                 try:
-                    review_method = cast(Any, getattr(llm_client, "review", None))
-                    if callable(review_method):
-                        llm_result = await _maybe_await(review_method(context))
-                        llm_findings = getattr(llm_result, "findings", [])
-                    else:
-                        llm_findings = []
+                    messages = [
+                        {"role": "system", "content": PR_REVIEW_SYSTEM_PROMPT},
+                        {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+                    ]
+                    llm_result, llm_error_findings = await llm_client.generate_structured(
+                        model=policy.llm_model,
+                        messages=messages,
+                        schema=LLMReviewResult,
+                    )
+                    llm_findings: list[Any] = list(llm_error_findings)
+                    if llm_result is not None:
+                        llm_findings.extend(llm_result.findings)
                     findings.extend(llm_findings)
                     _log_event("llm.review_done", findings=len(llm_findings))
                 except Exception as llm_error:  # noqa: BLE001

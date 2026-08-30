@@ -31,6 +31,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model": "gpt-4o",
         "max_context_tokens": 8000,
         "budget_usd_per_pr": 0.50,
+        "base_url": None,
+        "api_key_env": "OPENAI_API_KEY",
         "strategy": {
             "only_when": ["large_diff", "security_related"],
             "rubric": ["correctness", "security", "performance"],
@@ -59,6 +61,7 @@ SUPPORTED_LLM_PROVIDERS = {
     "glm",
     "minimax",
     "kimi",
+    "custom",
 }
 
 
@@ -79,6 +82,8 @@ class LLMConfig(BaseModel):
     model: str = "gpt-4o"
     max_context_tokens: int = 8000
     budget_usd_per_pr: float = 0.50
+    base_url: str | None = None
+    api_key_env: str = "OPENAI_API_KEY"
     strategy: LLMStrategy = Field(default_factory=LLMStrategy)
 
 

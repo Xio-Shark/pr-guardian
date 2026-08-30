@@ -165,14 +165,17 @@ class OpenAICompatibleClient(LLMClient):
         if not isinstance(content, str):
             raise LLMProviderError(provider=self.provider_name, message=f"{self.provider_name} content 格式错误")
 
+        # 部分推理模型（如 DeepSeek-R1）会把 JSON 包在 ```json ... ``` 代码块里，先剥离再解析。
+        stripped_content = self._strip_code_fence(content)
+
         try:
-            parsed = json.loads(content)
+            parsed = json.loads(stripped_content)
             if isinstance(parsed, dict):
                 return parsed
         except ValueError:
             pass
 
-        match = re.search(r"\{.*\}", content, re.DOTALL)
+        match = re.search(r"\{.*\}", stripped_content, re.DOTALL)
         if match is None:
             raise LLMProviderError(provider=self.provider_name, message=f"{self.provider_name} content 不是 JSON")
 
@@ -184,6 +187,19 @@ class OpenAICompatibleClient(LLMClient):
         if not isinstance(parsed_match, dict):
             raise LLMProviderError(provider=self.provider_name, message=f"{self.provider_name} 结构化结果不是对象")
         return parsed_match
+
+    @staticmethod
+    def _strip_code_fence(content: str) -> str:
+        stripped = content.strip()
+        if not stripped.startswith("```"):
+            return stripped
+        # 去掉首行 ``` 或 ```json 围栏，以及末尾 ```。
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        fence_line = stripped.find("\n")
+        if fence_line != -1:
+            stripped = stripped[fence_line + 1 :]
+        return stripped.strip()
 
     def _schema_error_finding(self, schema_error: ValidationError) -> Finding:
         return Finding(
